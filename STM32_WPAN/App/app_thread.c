@@ -114,6 +114,37 @@ static void APP_THREAD_FreeRTOSProcessMsgM0ToM4Task(void *argument);
 static void APP_THREAD_FreeRTOSSendCLIToM0Task(void *argument);
 
 /* USER CODE BEGIN PFP */
+/* Dummy request/response handlers */
+static void APP_THREAD_DummyReqHandler(void     * p_context,
+                            otCoapHeader        * pHeader,
+                            otMessage           * pMessage,
+                            const otMessageInfo * pMessageInfo); 
+static void APP_THREAD_DummyRespHandler(void    * p_context,
+                            otCoapHeader        * pHeader,
+                            otMessage           * pMessage,
+                            const otMessageInfo * pMessageInfo,
+                            otError             Result);
+
+/* pH resource request handler */ 
+static void APP_THREAD_ph_ReqHandler(otCoapHeader   * pHeader,
+                            otMessage               * pMessage,
+                            const otMessageInfo     * pMessageInfo);
+static otError APP_THREAD_ph_RespSend(otCoapHeader  * pRequestHeader,
+                            const otMessageInfo     * pMessageInfo);
+
+/* EC resource request handler */ 
+static void APP_THREAD_ec_ReqHandler(otCoapHeader   * pHeader,
+                            otMessage               * pMessage,
+                            const otMessageInfo     * pMessageInfo);
+static otError APP_THREAD_ec_RespSend(otCoapHeader  * pRequestHeader,
+                            const otMessageInfo     * pMessageInfo);
+
+/* Temperature resource request handler */ 
+static void APP_THREAD_temp_ReqHandler(otCoapHeader * pHeader,
+                            otMessage               * pMessage,
+                            const otMessageInfo     * pMessageInfo);
+static otError APP_THREAD_temp_RespSend(otCoapHeader * pRequestHeader,
+                            const otMessageInfo      * pMessageInfo);
 
 /* USER CODE END PFP */
 
@@ -144,7 +175,26 @@ static osThreadId_t OsTaskMsgM0ToM4Id;      /* Task managing the M0 to M4 messag
 static osThreadId_t OsTaskCliId;            /* Task used to manage CLI comamnd             */
 
 /* USER CODE BEGIN PV */
+static otCoapResource OT_Resource_ph = {C_RESOURCE_PH, 
+                            APP_THREAD_DummyReqHandler,
+                            (void*) APP_THREAD_ph_ReqHandler,
+                            NULL};
+static otCoapResource OT_Resource_ec = {C_RESOURCE_EC,
+                            APP_THREAD_DummyReqHandler,
+                            (void*) APP_THREAD_ec_ReqHandler,
+                            NULL};
+static otCoapResource OT_Resource_temp = {C_RESOURCE_TEMP,
+                            APP_THREAD_DummyReqHandler,
+                            (void*) APP_THREAD_temp_ReqHandler,
+                            NULL};
 
+static otMessageInfo OT_MessageInfo = {0};
+static otCoapHeader  OT_Header = {0};
+static otMessage   * pOT_Message = NULL;
+
+static __IO char * PH_str = "pH";
+static __IO char * EC_str = "EC";
+static __IO char * TEMP_str = "temperature";
 /* USER CODE END PV */
 
 /* Functions Definition ------------------------------------------------------*/
@@ -241,6 +291,9 @@ void APP_THREAD_Error(uint32_t ErrId, uint32_t ErrCode)
     APP_THREAD_TraceError("ERROR : ERR_THREAD_CHECK_WIRELESS ",ErrCode);
     break;
   /* USER CODE BEGIN APP_THREAD_Error_2 */
+  case ERR_NEW_MSG_ALLOC :
+    APP_THREAD_TraceError("ERROR : ERR_NEW_MSG_ALLOC ",ErrCode);
+    break;
   case ERR_THREAD_COAP_START :
     APP_THREAD_TraceError("ERROR : ERR_THREAD_COAP_START ",ErrCode);
     break;
@@ -325,6 +378,24 @@ static void APP_THREAD_DeviceConfig(void)
   if (error != OT_ERROR_NONE)
   {
     APP_THREAD_Error(ERR_THREAD_COAP_START,error);
+  }
+  /* Add pH CoAP resource */
+  error = otCoapAddResource(NULL, &OT_Resource_ph);
+  if (error != OT_ERROR_NONE)
+  {
+    APP_THREAD_Error(ERR_THREAD_COAP_ADD_RESSOURCE,error);
+  }
+  /* Add EC CoAP resource */
+  error = otCoapAddResource(NULL, &OT_Resource_ec);
+  if (error != OT_ERROR_NONE)
+  {
+    APP_THREAD_Error(ERR_THREAD_COAP_ADD_RESSOURCE,error);
+  }
+  /* Add Temperature CoAP resource */
+  error = otCoapAddResource(NULL, &OT_Resource_temp);
+  if (error != OT_ERROR_NONE)
+  {
+    APP_THREAD_Error(ERR_THREAD_COAP_ADD_RESSOURCE,error);
   }
   /* USER CODE END DEVICECONFIG */
 }
@@ -497,6 +568,222 @@ static void APP_THREAD_FreeRTOSSendCLIToM0Task(void *argument)
 /* USER CODE END FREERTOS_WRAPPER_FUNCTIONS */
 
 /* USER CODE BEGIN FD_LOCAL_FUNCTIONS */
+/**
+ * @brief This function is used to handle the pH requests
+ *
+ * @param pHeader header pointer
+ * @param pMessage message pointer
+ * @param pMessageInfo message info pointer
+ * @retval None
+ */
+static void APP_THREAD_ph_ReqHandler(otCoapHeader   * pHeader,
+                            otMessage               * pMessage,
+                            const otMessageInfo     * pMessageInfo)
+{
+    do
+    {
+        APP_DBG(" ********* APP_THREAD_ph_ReqHandler \r\n");
+        if (otCoapHeaderGetType(pHeader) == OT_COAP_TYPE_CONFIRMABLE &&
+            otCoapHeaderGetCode(pHeader) == OT_COAP_CODE_GET)
+        {
+            if (APP_THREAD_ph_RespSend(pHeader, pMessageInfo) != OT_ERROR_NONE)
+            {
+                APP_THREAD_Error(ERR_THREAD_COAP_SEND_RESPONSE, 0);
+            }
+        }
+        else
+        {
+          APP_THREAD_Error(ERR_THREAD_COAP_ADD_RESSOURCE, 0);
+          break;
+        }
+    } 
+    while (false);
+}
+
+/**
+ * @brief This function is used to send the pH response
+ *
+ * @param pHeader header pointer
+ * @param pMessage message pointer
+ * @param pMessageInfo message info pointer
+ * @retval None
+ */
+static otError APP_THREAD_ph_RespSend(otCoapHeader  * pRequestHeader,
+                            const otMessageInfo     * pMessageInfo)
+{
+    otError error = OT_ERROR_NONE;
+
+    do
+    {
+        otCoapHeaderInit(&OT_Header, OT_COAP_TYPE_ACKNOWLEDGMENT, OT_COAP_CODE_CONTENT);
+        otCoapHeaderSetMessageId(&OT_Header, otCoapHeaderGetMessageId(pRequestHeader));
+        otCoapHeaderSetToken(&OT_Header,
+                            otCoapHeaderGetToken(pRequestHeader),
+                            otCoapHeaderGetTokenLength(pRequestHeader));
+        otCoapHeaderAppendContentFormatOption(&OT_Header,
+                            OT_COAP_OPTION_CONTENT_FORMAT_TEXT_PLAIN);
+        otCoapHeaderSetPayloadMarker(&OT_Header);
+
+        pOT_Message = otCoapNewMessage(NULL, &OT_Header);
+        if (pOT_Message == NULL)
+        {
+            APP_THREAD_Error(ERR_NEW_MSG_ALLOC,error);
+        }
+
+        error = otMessageAppend(pOT_Message, (void *) PH_str, sizeof(*PH_str)*strlen(PH_str));
+        if (error != OT_ERROR_NONE)
+        {
+            APP_THREAD_Error(ERR_THREAD_COAP_APPEND,error);
+            break;
+        }
+
+        error = otCoapSendResponse(NULL, pOT_Message, pMessageInfo);
+        if (error != OT_ERROR_NONE && pOT_Message != NULL)
+        {
+            otMessageFree(pOT_Message);
+            APP_THREAD_Error(ERR_THREAD_COAP_SEND_RESPONSE,error);
+        }
+
+
+    } while (false);
+
+    return error;
+}
+
+/* EC resource request handler */ 
+static void APP_THREAD_ec_ReqHandler(otCoapHeader   * pHeader,
+                            otMessage               * pMessage,
+                            const otMessageInfo     * pMessageInfo)
+{
+    do
+    {
+        APP_DBG(" ********* APP_THREAD_ec_ReqHandler \r\n");
+        if (otCoapHeaderGetType(pHeader) == OT_COAP_TYPE_CONFIRMABLE &&
+            otCoapHeaderGetCode(pHeader) == OT_COAP_CODE_GET)
+        {
+            if (APP_THREAD_ec_RespSend(pHeader, pMessageInfo) != OT_ERROR_NONE)
+            {
+                APP_THREAD_Error(ERR_THREAD_COAP_SEND_RESPONSE, 0);
+            }
+        }
+        else
+        {
+          APP_THREAD_Error(ERR_THREAD_COAP_ADD_RESSOURCE, 0);
+          break;
+        }
+    } 
+    while (false);
+}
+
+static otError APP_THREAD_ec_RespSend(otCoapHeader  * pRequestHeader,
+                            const otMessageInfo     * pMessageInfo)
+{
+    otError error = OT_ERROR_NONE;
+
+    do
+    {
+        otCoapHeaderInit(&OT_Header, OT_COAP_TYPE_ACKNOWLEDGMENT, OT_COAP_CODE_CONTENT);
+        otCoapHeaderSetMessageId(&OT_Header, otCoapHeaderGetMessageId(pRequestHeader));
+        otCoapHeaderSetToken(&OT_Header,
+                            otCoapHeaderGetToken(pRequestHeader),
+                            otCoapHeaderGetTokenLength(pRequestHeader));
+        otCoapHeaderAppendContentFormatOption(&OT_Header,
+                            OT_COAP_OPTION_CONTENT_FORMAT_TEXT_PLAIN);
+        otCoapHeaderSetPayloadMarker(&OT_Header);
+
+        pOT_Message = otCoapNewMessage(NULL, &OT_Header);
+        if (pOT_Message == NULL)
+        {
+            APP_THREAD_Error(ERR_NEW_MSG_ALLOC,error);
+        }
+
+        error = otMessageAppend(pOT_Message, (void *) EC_str, sizeof(*EC_str)*strlen(EC_str));
+        if (error != OT_ERROR_NONE)
+        {
+            APP_THREAD_Error(ERR_THREAD_COAP_APPEND,error);
+            break;
+        }
+
+        error = otCoapSendResponse(NULL, pOT_Message, pMessageInfo);
+        if (error != OT_ERROR_NONE && pOT_Message != NULL)
+        {
+            otMessageFree(pOT_Message);
+            APP_THREAD_Error(ERR_THREAD_COAP_SEND_RESPONSE,error);
+        }
+
+
+    } while (false);
+
+    return error;
+}
+
+/* Temperature resource request handler */ 
+static void APP_THREAD_temp_ReqHandler(otCoapHeader * pHeader,
+                            otMessage               * pMessage,
+                            const otMessageInfo     * pMessageInfo)
+{
+    do
+    {
+        APP_DBG(" ********* APP_THREAD_temp_ReqHandler \r\n");
+        if (otCoapHeaderGetType(pHeader) == OT_COAP_TYPE_CONFIRMABLE &&
+            otCoapHeaderGetCode(pHeader) == OT_COAP_CODE_GET)
+        {
+            if (APP_THREAD_temp_RespSend(pHeader, pMessageInfo) != OT_ERROR_NONE)
+            {
+                APP_THREAD_Error(ERR_THREAD_COAP_SEND_RESPONSE, 0);
+            }
+        }
+        else
+        {
+          APP_THREAD_Error(ERR_THREAD_COAP_ADD_RESSOURCE, 0);
+          break;
+        }
+    } 
+    while (false);
+}
+
+static otError APP_THREAD_temp_RespSend(otCoapHeader * pRequestHeader,
+                            const otMessageInfo      * pMessageInfo)
+{
+    otError error = OT_ERROR_NONE;
+
+    do
+    {
+        otCoapHeaderInit(&OT_Header, OT_COAP_TYPE_ACKNOWLEDGMENT, OT_COAP_CODE_CONTENT);
+        otCoapHeaderSetMessageId(&OT_Header, otCoapHeaderGetMessageId(pRequestHeader));
+        otCoapHeaderSetToken(&OT_Header,
+                            otCoapHeaderGetToken(pRequestHeader),
+                            otCoapHeaderGetTokenLength(pRequestHeader));
+        otCoapHeaderAppendContentFormatOption(&OT_Header,
+                            OT_COAP_OPTION_CONTENT_FORMAT_TEXT_PLAIN);
+        otCoapHeaderSetPayloadMarker(&OT_Header);
+
+        pOT_Message = otCoapNewMessage(NULL, &OT_Header);
+        if (pOT_Message == NULL)
+        {
+            APP_THREAD_Error(ERR_NEW_MSG_ALLOC,error);
+        }
+
+        error = otMessageAppend(pOT_Message, (void *) TEMP_str, sizeof(*TEMP_str)*strlen(TEMP_str));
+        if (error != OT_ERROR_NONE)
+        {
+            APP_THREAD_Error(ERR_THREAD_COAP_APPEND,error);
+            break;
+        }
+
+        error = otCoapSendResponse(NULL, pOT_Message, pMessageInfo);
+        if (error != OT_ERROR_NONE && pOT_Message != NULL)
+        {
+            otMessageFree(pOT_Message);
+            APP_THREAD_Error(ERR_THREAD_COAP_SEND_RESPONSE,error);
+        }
+
+
+    } while (false);
+
+    return error;
+
+}
 
 /**
   * @brief Dummy request handler
@@ -508,6 +795,30 @@ static void APP_THREAD_DummyReqHandler(void    * p_context,
                            otMessage           * pMessage,
                            const otMessageInfo * pMessageInfo)
 {
+}
+
+/**
+ * @brief This function is used to handle a dummy response handler
+ *
+ * @param p_context  context
+ * @param pHeader  coap header
+ * @param pMessage message
+ * @paramp pMessageInfo otMessage information
+ * @param Result error status
+ * @retval None
+ */
+static void APP_THREAD_DummyRespHandler(void    * p_context,
+                            otCoapHeader        * pHeader,
+                            otMessage           * pMessage,
+                            const otMessageInfo * pMessageInfo,
+                            otError             Result)
+{
+  /* Prevent unused argument(s) compilation warning */
+  UNUSED(p_context);
+  UNUSED(pHeader);
+  UNUSED(pMessage);
+  UNUSED(pMessageInfo);
+  UNUSED(Result);
 }
 /* USER CODE END FD_LOCAL_FUNCTIONS */
 

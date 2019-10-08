@@ -28,6 +28,7 @@
 /* USER CODE BEGIN Includes */
 #include "hw_conf.h"
 #include "otp.h"
+#include "stdio.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -37,11 +38,32 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+#define MEAS_STRSIZE    16
 
+/* Size of ADC buffer */
+#define ADC_BUFFERSIZE      ((uint32_t) 4)
+
+#define ADC_COMPLETE_FLAG   ((uint32_t) 1)
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
+
+/**
+  * @brief  Macro to calculate the voltage (unit: mVolt)
+  *         corresponding to a ADC conversion data (unit: digital value).
+  * @note   ADC measurement data must correspond to a resolution of 12bits
+  *         (full scale digital value 4095). If not the case, the data must be
+  *         preliminarily rescaled to an equivalent resolution of 12 bits.
+  * @note   Analog reference voltage (Vref+) must be known from
+  *         user board environment.
+  * @param  __VREFANALOG_VOLTAGE__ Analog reference voltage (unit: mV)
+  * @param  __ADC_DATA__ ADC conversion data (resolution 12 bits)
+  *                       (unit: digital value).
+  * @retval ADC conversion data equivalent voltage value (unit: mVolt)
+  */
+#define __ADC_CALC_DATA_VOLTAGE(__VREFANALOG_VOLTAGE__, __ADC_DATA__)       \
+   (__ADC_DATA__) * (__VREFANALOG_VOLTAGE__) / DIGITAL_SCALE_12BITS
 
 /* USER CODE END PM */
 
@@ -54,9 +76,22 @@ RTC_HandleTypeDef hrtc;
 UART_HandleTypeDef huart1;
 DMA_HandleTypeDef hdma_usart1_tx;
 
+typedef StaticTask_t osStaticThreadDef_t;
 osThreadId_t defaultTaskHandle;
+osThreadId_t adcConvTaskHandle;
+uint32_t adcConvTaskBuffer[ 256 ];
+osStaticThreadDef_t adcConvTaskControlBlock;
 /* USER CODE BEGIN PV */
+char ch1_str[MEAS_STRSIZE];
+char ch2_str[MEAS_STRSIZE];
+char ch3_str[MEAS_STRSIZE];
 
+float ch1_mv;
+float ch2_mv;
+float ch3_mv;
+
+/* Variables for ADC conversion data */
+__IO uint16_t uhADCxConvertedData[ADC_BUFFERSIZE];
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -66,10 +101,12 @@ static void MX_DMA_Init(void);
 static void MX_ADC1_Init(void);
 static void MX_RF_Init(void);
 static void MX_RTC_Init(void);
-static void MX_USART1_UART_Init(void);
+void MX_USART1_UART_Init(void);
 void StartDefaultTask(void *argument);
+void adcConv(void *argument);
 
 /* USER CODE BEGIN PFP */
+char * ADC_ChannelGet_str(uint8_t channel_id);
 void PeriphClock_Config(void);
 static void Reset_Device( void );
 static void Reset_IPCC( void );
@@ -148,6 +185,17 @@ int main(void)
     .stack_size = 1024
   };
   defaultTaskHandle = osThreadNew(StartDefaultTask, NULL, &defaultTask_attributes);
+
+  /* definition and creation of adcConvTask */
+  const osThreadAttr_t adcConvTask_attributes = {
+    .name = "adcConvTask",
+    .stack_mem = &adcConvTaskBuffer[0],
+    .stack_size = sizeof(adcConvTaskBuffer),
+    .cb_mem = &adcConvTaskControlBlock,
+    .cb_size = sizeof(adcConvTaskControlBlock),
+    .priority = (osPriority_t) osPriorityAboveNormal,
+  };
+  adcConvTaskHandle = osThreadNew(adcConv, NULL, &adcConvTask_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
@@ -232,7 +280,7 @@ void SystemClock_Config(void)
   PeriphClkInitStruct.PLLSAI1.PLLSAI1ClockOut = RCC_PLLSAI1_ADCCLK;
   PeriphClkInitStruct.Usart1ClockSelection = RCC_USART1CLKSOURCE_PCLK2;
   PeriphClkInitStruct.AdcClockSelection = RCC_ADCCLKSOURCE_PLLSAI1;
-  PeriphClkInitStruct.RTCClockSelection = RCC_RTCCLKSOURCE_LSI;
+  PeriphClkInitStruct.RTCClockSelection = RCC_RTCCLKSOURCE_HSE_DIV32;
   PeriphClkInitStruct.RFWakeUpClockSelection = RCC_RFWKPCLKSOURCE_LSI;
   PeriphClkInitStruct.SmpsClockSelection = RCC_SMPSCLKSOURCE_HSE;
   PeriphClkInitStruct.SmpsDivSelection = RCC_SMPSCLKDIV_RANGE0;
@@ -267,7 +315,7 @@ static void MX_ADC1_Init(void)
   hadc1.Init.Resolution = ADC_RESOLUTION_12B;
   hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
   hadc1.Init.ScanConvMode = ADC_SCAN_ENABLE;
-  hadc1.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
+  hadc1.Init.EOCSelection = ADC_EOC_SEQ_CONV;
   hadc1.Init.LowPowerAutoWait = DISABLE;
   hadc1.Init.ContinuousConvMode = DISABLE;
   hadc1.Init.NbrOfConversion = 4;
@@ -369,7 +417,7 @@ static void MX_RTC_Init(void)
   hrtc.Instance = RTC;
   hrtc.Init.HourFormat = RTC_HOURFORMAT_24;
   hrtc.Init.AsynchPrediv = CFG_RTC_ASYNCH_PRESCALER;
-  hrtc.Init.SynchPrediv = CFG_RTC_SYNCH_PRESCALER;
+  hrtc.Init.SynchPrediv = CFG_RTC_SYNCH_PRESCALER ;
   hrtc.Init.OutPut = RTC_OUTPUT_DISABLE;
   hrtc.Init.OutPutPolarity = RTC_OUTPUT_POLARITY_HIGH;
   hrtc.Init.OutPutType = RTC_OUTPUT_TYPE_OPENDRAIN;
@@ -388,7 +436,7 @@ static void MX_RTC_Init(void)
   * @param None
   * @retval None
   */
-static void MX_USART1_UART_Init(void)
+void MX_USART1_UART_Init(void)
 {
 
   /* USER CODE BEGIN USART1_Init 0 */
@@ -497,6 +545,7 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
 
 }
+
 /* USER CODE BEGIN 4 */
 void PeriphClock_Config(void)
 {
@@ -625,6 +674,36 @@ static void Init_Exti( void )
 
   return;
 }
+
+void HAL_ADC_ConvCpltCallback ( ADC_HandleTypeDef *hadc)
+{
+    HAL_GPIO_TogglePin(LD1_GPIO_Port, LD1_Pin);
+    /* Set event flag to indicate ADC completion */
+    osThreadFlagsSet(&adcConvTaskHandle, ADC_COMPLETE_FLAG);
+}		/* -----  end of function HAL_ADC_ConvCpltCallback  ----- */
+
+
+char * ADC_ChannelGet_str(uint8_t channel_id)
+{
+    char *ptr;
+    switch (channel_id)
+    {
+    case 1:
+        ptr = (char *)ch1_str;
+        break;
+    case 2:
+        ptr = (char *)ch2_str;
+        break;
+    case 3:
+        ptr = (char *)ch3_str;
+        break;
+    default:
+        ptr = (char *)ch1_str;
+        break;
+    };
+    return ptr;
+
+}
 /* USER CODE END 4 */
 
 /* USER CODE BEGIN Header_StartDefaultTask */
@@ -644,6 +723,66 @@ void StartDefaultTask(void *argument)
     osThreadFlagsWait(1,osFlagsWaitAll,osWaitForever);
   }
   /* USER CODE END 5 */ 
+}
+
+/* USER CODE BEGIN Header_adcConv */
+/**
+* @brief Function implementing the adcConvTask thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_adcConv */
+void adcConv(void *argument)
+{
+  /* USER CODE BEGIN adcConv */
+  /* Infinite loop */
+  for(;;)
+  {
+    /*## Start ADC conversions ###############################################*/
+    /* Clear ADC conversion flag */
+    osThreadFlagsClear(ADC_COMPLETE_FLAG);
+
+    /* Start ADC conversion with DMA */
+    if ( HAL_ADC_Start_DMA(&hadc1, (uint32_t *) uhADCxConvertedData, ADC_BUFFERSIZE) != HAL_OK)
+    {
+        /* ADC conversion start error */
+        Error_Handler();
+    }
+
+    /* Wait till conversion is done */
+    osThreadFlagsWait(ADC_COMPLETE_FLAG, osFlagsWaitAny, osWaitForever);
+
+    /*## Stop ADC conversions ################################################*/
+    /* Stop ADC conversion with DMA */
+    if ( HAL_ADC_Stop_DMA(&hadc1) != HAL_OK)
+    {
+        /* ADC conversion stop error */
+        Error_Handler();
+    }
+
+    /*## Compute voltages from adc readings ##################################*/
+    uint16_t int_ref = __HAL_ADC_CALC_VREFANALOG_VOLTAGE(uhADCxConvertedData[0],
+                            ADC_RESOLUTION_12B); 
+
+    ch1_mv = __ADC_CALC_DATA_VOLTAGE((float) int_ref,
+                            (float) uhADCxConvertedData[1]);       
+    ch2_mv = __ADC_CALC_DATA_VOLTAGE((float) int_ref,
+                            (float) uhADCxConvertedData[2]);
+    ch3_mv = __ADC_CALC_DATA_VOLTAGE((float) int_ref,
+                            (float) uhADCxConvertedData[3]);
+
+    /*## Generate voltage strings ############################################*/
+    sprintf(ch1_str, "%f", ch1_mv);
+    sprintf(ch2_str, "%f", ch2_mv);
+    sprintf(ch3_str, "%f", ch3_mv);
+
+    /*## Compute temperature, ph, and ec #####################################*/
+    
+
+    /*## Delay ###############################################################*/
+    osDelay(750);
+  }
+  /* USER CODE END adcConv */
 }
 
 /**
@@ -675,7 +814,14 @@ void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
   /* User can add his own implementation to report the HAL error return state */
-
+  for (;;)
+  {  
+	HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
+	HAL_Delay(250);
+	HAL_GPIO_TogglePin(LD1_GPIO_Port, LD1_Pin);
+	HAL_GPIO_TogglePin(LD3_GPIO_Port, LD3_Pin);
+	HAL_Delay(250);
+  }
   /* USER CODE END Error_Handler_Debug */
 }
 

@@ -146,6 +146,8 @@ static void APP_THREAD_temp_ReqHandler(otCoapHeader * pHeader,
 static otError APP_THREAD_temp_RespSend(otCoapHeader * pRequestHeader,
                             const otMessageInfo      * pMessageInfo);
 
+otError APP_THREAD_MethodNotAllowed_RespSend(otCoapHeader   * pHeader,
+                            const otMessageInfo             * pMessageInfo);
 /* USER CODE END PFP */
 
 /* Private variables -----------------------------------------------*/
@@ -188,13 +190,9 @@ static otCoapResource OT_Resource_temp = {C_RESOURCE_TEMP,
                             (void*) APP_THREAD_temp_ReqHandler,
                             NULL};
 
-static otMessageInfo OT_MessageInfo = {0};
 static otCoapHeader  OT_Header = {0};
 static otMessage   * pOT_Message = NULL;
 
-static __IO char * PH_str = "pH";
-static __IO char * EC_str = "EC";
-static __IO char * TEMP_str = "temperature";
 /* USER CODE END PV */
 
 /* Functions Definition ------------------------------------------------------*/
@@ -226,7 +224,7 @@ void APP_THREAD_Init( void )
   APP_THREAD_TL_THREAD_INIT();
 
   /* Configure UART for sending CLI command from M4 */
-//  APP_THREAD_Init_UART_CLI();
+  APP_THREAD_Init_UART_CLI();
 
   /* Send Thread start system cmd to M0 */
   ThreadInitStatus = SHCI_C2_THREAD_Init();
@@ -248,9 +246,9 @@ void APP_THREAD_Init( void )
   /* Configure the Thread device at start */
   APP_THREAD_DeviceConfig();
 
-  /* USER CODE BEGIN APP_THREAD_INIT_2 */
+ /* USER CODE BEGIN APP_THREAD_INIT_2 */
 
-  /* USER CODE END APP_THREAD_INIT_2 */
+ /* USER CODE END APP_THREAD_INIT_2 */
 }
 
 /**
@@ -267,12 +265,12 @@ void APP_THREAD_Error(uint32_t ErrId, uint32_t ErrCode)
   switch(ErrId)
   {
   case ERR_REC_MULTI_MSG_FROM_M0 :
-    APP_THREAD_TraceError("ERROR : ERR_REC_MULTI_MSG_FROM_M0 ",ErrCode);
+    APP_THREAD_TraceError("ERROR : ERR_REC_MULTI_MSG_FROM_M0 ", ErrCode);
     break;
   case ERR_THREAD_SET_STATE_CB :
     APP_THREAD_TraceError("ERROR : ERR_THREAD_SET_STATE_CB ",ErrCode);
     break;
-  case ERR_THREAD_SET_CHANNEL :
+   case ERR_THREAD_SET_CHANNEL :
     APP_THREAD_TraceError("ERROR : ERR_THREAD_SET_CHANNEL ",ErrCode);
     break;
   case ERR_THREAD_SET_PANID :
@@ -322,7 +320,7 @@ void APP_THREAD_Error(uint32_t ErrId, uint32_t ErrCode)
   default :
     APP_THREAD_TraceError("ERROR Unknown ", 0);
     break;
-  }
+    }
 }
 
 /*************************************************************
@@ -478,7 +476,7 @@ static void APP_THREAD_TraceError(const char * pMess, uint32_t ErrCode)
       HAL_Delay(250);
       HAL_GPIO_TogglePin(LD3_GPIO_Port, LD3_Pin);
       HAL_Delay(250);
-      HAL_GPIO_TogglePin(LD3_GPIO_Port, LD3_Pin);
+      HAL_GPIO_TogglePin(LD1_GPIO_Port, LD1_Pin);
       HAL_Delay(250);
   }
   /* USER CODE END TRACE_ERROR */
@@ -582,7 +580,6 @@ static void APP_THREAD_ph_ReqHandler(otCoapHeader   * pHeader,
 {
     do
     {
-        APP_DBG(" ********* APP_THREAD_ph_ReqHandler \r\n");
         if (otCoapHeaderGetType(pHeader) == OT_COAP_TYPE_CONFIRMABLE &&
             otCoapHeaderGetCode(pHeader) == OT_COAP_CODE_GET)
         {
@@ -593,8 +590,10 @@ static void APP_THREAD_ph_ReqHandler(otCoapHeader   * pHeader,
         }
         else
         {
-          APP_THREAD_Error(ERR_THREAD_COAP_ADD_RESSOURCE, 0);
-          break;
+            if (APP_THREAD_MethodNotAllowed_RespSend(pHeader, pMessageInfo) != OT_ERROR_NONE)
+            {
+                APP_THREAD_Error(ERR_THREAD_COAP_SEND_RESPONSE, 0);
+            }
         }
     } 
     while (false);
@@ -612,7 +611,6 @@ static otError APP_THREAD_ph_RespSend(otCoapHeader  * pRequestHeader,
                             const otMessageInfo     * pMessageInfo)
 {
     otError error = OT_ERROR_NONE;
-
     do
     {
         otCoapHeaderInit(&OT_Header, OT_COAP_TYPE_ACKNOWLEDGMENT, OT_COAP_CODE_CONTENT);
@@ -630,7 +628,8 @@ static otError APP_THREAD_ph_RespSend(otCoapHeader  * pRequestHeader,
             APP_THREAD_Error(ERR_NEW_MSG_ALLOC,error);
         }
 
-        error = otMessageAppend(pOT_Message, (void *) PH_str, sizeof(*PH_str)*strlen(PH_str));
+        char * str_ptr = ADC_ChannelGet_str(1);
+        error = otMessageAppend(pOT_Message, (void *) str_ptr, sizeof(char)*strlen(str_ptr));
         if (error != OT_ERROR_NONE)
         {
             APP_THREAD_Error(ERR_THREAD_COAP_APPEND,error);
@@ -668,8 +667,10 @@ static void APP_THREAD_ec_ReqHandler(otCoapHeader   * pHeader,
         }
         else
         {
-          APP_THREAD_Error(ERR_THREAD_COAP_ADD_RESSOURCE, 0);
-          break;
+            if (APP_THREAD_MethodNotAllowed_RespSend(pHeader, pMessageInfo) != OT_ERROR_NONE)
+            {
+                APP_THREAD_Error(ERR_THREAD_COAP_SEND_RESPONSE, 0);
+            }
         }
     } 
     while (false);
@@ -697,7 +698,8 @@ static otError APP_THREAD_ec_RespSend(otCoapHeader  * pRequestHeader,
             APP_THREAD_Error(ERR_NEW_MSG_ALLOC,error);
         }
 
-        error = otMessageAppend(pOT_Message, (void *) EC_str, sizeof(*EC_str)*strlen(EC_str));
+        char * str_ptr = ADC_ChannelGet_str(2);
+        error = otMessageAppend(pOT_Message, (void *) str_ptr, sizeof(char)*strlen(str_ptr));
         if (error != OT_ERROR_NONE)
         {
             APP_THREAD_Error(ERR_THREAD_COAP_APPEND,error);
@@ -735,8 +737,10 @@ static void APP_THREAD_temp_ReqHandler(otCoapHeader * pHeader,
         }
         else
         {
-          APP_THREAD_Error(ERR_THREAD_COAP_ADD_RESSOURCE, 0);
-          break;
+            if (APP_THREAD_MethodNotAllowed_RespSend(pHeader, pMessageInfo) != OT_ERROR_NONE)
+            {
+                APP_THREAD_Error(ERR_THREAD_COAP_SEND_RESPONSE, 0);
+            }
         }
     } 
     while (false);
@@ -764,7 +768,8 @@ static otError APP_THREAD_temp_RespSend(otCoapHeader * pRequestHeader,
             APP_THREAD_Error(ERR_NEW_MSG_ALLOC,error);
         }
 
-        error = otMessageAppend(pOT_Message, (void *) TEMP_str, sizeof(*TEMP_str)*strlen(TEMP_str));
+        char * str_ptr = ADC_ChannelGet_str(3);
+        error = otMessageAppend(pOT_Message, (void *) str_ptr, sizeof(char)*strlen(str_ptr));
         if (error != OT_ERROR_NONE)
         {
             APP_THREAD_Error(ERR_THREAD_COAP_APPEND,error);
@@ -785,6 +790,47 @@ static otError APP_THREAD_temp_RespSend(otCoapHeader * pRequestHeader,
 
 }
 
+
+/**
+ * @brief This function is used to send MethodNotAllowed response
+ *
+ * @param pHeader header pointer
+ * @param pMessage message pointer
+ * @param pMessageInfo message info pointer
+ * @retval None
+ */
+otError APP_THREAD_MethodNotAllowed_RespSend(otCoapHeader  * pRequestHeader,
+                            const otMessageInfo     * pMessageInfo)
+{
+    otError error = OT_ERROR_NONE;
+
+    do
+    {
+        otCoapHeaderInit(&OT_Header, OT_COAP_TYPE_ACKNOWLEDGMENT,
+                            OT_COAP_CODE_METHOD_NOT_ALLOWED);
+        otCoapHeaderSetMessageId(&OT_Header, otCoapHeaderGetMessageId(pRequestHeader));
+        otCoapHeaderSetToken(&OT_Header,
+                            otCoapHeaderGetToken(pRequestHeader),
+                            otCoapHeaderGetTokenLength(pRequestHeader));
+
+        pOT_Message = otCoapNewMessage(NULL, &OT_Header);
+        if (pOT_Message == NULL)
+        {
+            APP_THREAD_Error(ERR_NEW_MSG_ALLOC,error);
+        }
+
+        error = otCoapSendResponse(NULL, pOT_Message, pMessageInfo);
+        if (error != OT_ERROR_NONE && pOT_Message != NULL)
+        {
+            otMessageFree(pOT_Message);
+            APP_THREAD_Error(ERR_THREAD_COAP_SEND_RESPONSE,error);
+        }
+
+
+    } while (false);
+
+    return error;
+}
 /**
   * @brief Dummy request handler
   * @param
@@ -832,7 +878,6 @@ void APP_THREAD_RegisterCmdBuffer(TL_CmdPacket_t* p_buffer)
 {
   p_thread_otcmdbuffer = p_buffer;
 }
-
 
 Thread_OT_Cmd_Request_t* THREAD_Get_OTCmdPayloadBuffer(void)
 {
@@ -919,7 +964,7 @@ void Pre_OtCmdProcessing(void)
   */
 static void Wait_Getting_Ack_From_M0(void)
 {
-   while (FlagReceiveAckFromM0 == 0)
+    while (FlagReceiveAckFromM0 == 0)
    {
    }
    FlagReceiveAckFromM0 = 0;
@@ -1052,8 +1097,8 @@ void APP_THREAD_Init_UART_CLI(void)
 {
   OsTaskCliId = osThreadNew(APP_THREAD_FreeRTOSSendCLIToM0Task, NULL,&ThreadCliProcess_attr);
 
-#if (CFG_USB_INTERFACE_ENABLE != 0)
-#else
+  #if (CFG_USB_INTERFACE_ENABLE != 0)
+  #else
   MX_USART1_UART_Init();
   HW_UART_Receive_IT(CFG_CLI_UART, aRxBuffer, 1, RxCpltCallback);
 #endif /* (CFG_USB_INTERFACE_ENABLE != 0) */

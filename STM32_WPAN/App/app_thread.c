@@ -472,9 +472,9 @@ static void APP_THREAD_TraceError(const char * pMess, uint32_t ErrCode)
   APP_DBG("**** Fatal error = %s (Err = %d)", pMess, ErrCode);
   for(;;)
   {
-      HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
-      HAL_Delay(250);
       HAL_GPIO_TogglePin(LD3_GPIO_Port, LD3_Pin);
+      HAL_Delay(250);
+      HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
       HAL_Delay(250);
       HAL_GPIO_TogglePin(LD1_GPIO_Port, LD1_Pin);
       HAL_Delay(250);

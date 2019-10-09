@@ -58,7 +58,6 @@ void FLASH_IRQHandler(void);
 void RCC_IRQHandler(void);
 void DMA1_Channel1_IRQHandler(void);
 void DMA1_Channel2_IRQHandler(void);
-void ADC1_IRQHandler(void);
 void C2SEV_PWR_C2H_IRQHandler(void);
 void TIM1_TRG_COM_TIM17_IRQHandler(void);
 void PWR_SOTF_BLEACT_802ACT_RFPHASE_IRQHandler(void);

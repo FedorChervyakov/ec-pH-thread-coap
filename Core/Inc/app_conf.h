@@ -64,7 +64,7 @@
 /**
  * Select UART interfaces
  */
-#define CFG_DEBUG_TRACE_UART    
+#define CFG_DEBUG_TRACE_UART
 #define CFG_CONSOLE_MENU      
 #define CFG_CLI_UART    hw_uart1
 /******************************************************************************
@@ -286,13 +286,6 @@ typedef enum
 #define CFG_THREAD_CLI_PROCESS_STACk_SIZE  (128 * 8)
 
 /* USER CODE BEGIN FreeRTOS_Defines */
-#define CFG_ADC_READ_PROCESS_NAME           "ADV_UPDATE_PROCESS"
-#define CFG_ADC_READ_PROCESS_ATTR_BITS      (0)
-#define CFG_ADC_READ_PROCESS_CB_MEM         (0)
-#define CFG_ADC_READ_PROCESS_CB_SIZE        (0)
-#define CFG_ADC_READ_PROCESS_STACK_MEM      (0)
-#define CFG_ADC_READ_PROCESS_PRIORITY       osPriorityNormal
-#define CFG_ADC_READ_PROCESS_STACk_SIZE     (128 * 8)
 /* USER CODE END FreeRTOS_Defines */
 /******************************************************************************
  * LOW POWER

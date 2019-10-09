@@ -28,7 +28,6 @@
 /* USER CODE BEGIN Includes */
 #include "hw_conf.h"
 #include "otp.h"
-#include "stdio.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -79,19 +78,17 @@ DMA_HandleTypeDef hdma_usart1_tx;
 typedef StaticTask_t osStaticThreadDef_t;
 osThreadId_t defaultTaskHandle;
 osThreadId_t adcConvTaskHandle;
-uint32_t adcConvTaskBuffer[ 256 ];
+uint32_t adcConvTaskBuffer[ 128 ];
 osStaticThreadDef_t adcConvTaskControlBlock;
 /* USER CODE BEGIN PV */
-char ch1_str[MEAS_STRSIZE];
-char ch2_str[MEAS_STRSIZE];
-char ch3_str[MEAS_STRSIZE];
+static char ch1_str[MEAS_STRSIZE];
+static char ch2_str[MEAS_STRSIZE];
+static char ch3_str[MEAS_STRSIZE];
 
-float ch1_mv;
-float ch2_mv;
-float ch3_mv;
+static float ch1_mv;
+static float ch2_mv;
+static float ch3_mv;
 
-/* Variables for ADC conversion data */
-__IO uint16_t uhADCxConvertedData[ADC_BUFFERSIZE];
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -315,7 +312,7 @@ static void MX_ADC1_Init(void)
   hadc1.Init.Resolution = ADC_RESOLUTION_12B;
   hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
   hadc1.Init.ScanConvMode = ADC_SCAN_ENABLE;
-  hadc1.Init.EOCSelection = ADC_EOC_SEQ_CONV;
+  hadc1.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
   hadc1.Init.LowPowerAutoWait = DISABLE;
   hadc1.Init.ContinuousConvMode = DISABLE;
   hadc1.Init.NbrOfConversion = 4;
@@ -371,6 +368,12 @@ static void MX_ADC1_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN ADC1_Init 2 */
+  /* Run the ADC calibration in single-ended mode */
+  if (HAL_ADCEx_Calibration_Start(&hadc1, ADC_SINGLE_ENDED) != HAL_OK)
+  {
+    /* Calibration Error */
+    Error_Handler();
+  }
 
   /* USER CODE END ADC1_Init 2 */
 
@@ -677,9 +680,9 @@ static void Init_Exti( void )
 
 void HAL_ADC_ConvCpltCallback ( ADC_HandleTypeDef *hadc)
 {
-    HAL_GPIO_TogglePin(LD1_GPIO_Port, LD1_Pin);
+    HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, GPIO_PIN_SET);
     /* Set event flag to indicate ADC completion */
-    osThreadFlagsSet(&adcConvTaskHandle, ADC_COMPLETE_FLAG);
+    osThreadFlagsSet(adcConvTaskHandle, ADC_COMPLETE_FLAG);
 }		/* -----  end of function HAL_ADC_ConvCpltCallback  ----- */
 
 
@@ -715,7 +718,6 @@ char * ADC_ChannelGet_str(uint8_t channel_id)
 /* USER CODE END Header_StartDefaultTask */
 void StartDefaultTask(void *argument)
 {
-
   /* USER CODE BEGIN 5 */
   /* Infinite loop */
   for(;;)
@@ -735,9 +737,13 @@ void StartDefaultTask(void *argument)
 void adcConv(void *argument)
 {
   /* USER CODE BEGIN adcConv */
+  /* Variables for ADC conversion data */
+  uint16_t uhADCxConvertedData[ADC_BUFFERSIZE];
+  uint16_t int_ref;
   /* Infinite loop */
   for(;;)
   {
+    HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, GPIO_PIN_RESET);  
     /*## Start ADC conversions ###############################################*/
     /* Clear ADC conversion flag */
     osThreadFlagsClear(ADC_COMPLETE_FLAG);
@@ -761,7 +767,7 @@ void adcConv(void *argument)
     }
 
     /*## Compute voltages from adc readings ##################################*/
-    uint16_t int_ref = __HAL_ADC_CALC_VREFANALOG_VOLTAGE(uhADCxConvertedData[0],
+    int_ref = __LL_ADC_CALC_VREFANALOG_VOLTAGE(uhADCxConvertedData[0],
                             ADC_RESOLUTION_12B); 
 
     ch1_mv = __ADC_CALC_DATA_VOLTAGE((float) int_ref,
@@ -772,9 +778,9 @@ void adcConv(void *argument)
                             (float) uhADCxConvertedData[3]);
 
     /*## Generate voltage strings ############################################*/
-    sprintf(ch1_str, "%f", ch1_mv);
-    sprintf(ch2_str, "%f", ch2_mv);
-    sprintf(ch3_str, "%f", ch3_mv);
+    gcvt(ch1_mv, 5, ch1_str);
+    gcvt(ch2_mv, 5, ch2_str);
+    gcvt(ch3_mv, 5, ch3_str);
 
     /*## Compute temperature, ph, and ec #####################################*/
     
